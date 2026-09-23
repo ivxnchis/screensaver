@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Drift — Screensaver</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c0a1e;
+    --ink: #f4eef8;
+    --ink-soft: rgba(244, 238, 248, 0.62);
+    --ink-faint: rgba(244, 238, 248, 0.32);
+    --serif: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --sans: "DM Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0c0a1e; } }
+  :root[data-theme="dark"] { --bg: #0c0a1e; }
+  *, *::before, *::after { box-sizing: inherit; margin: 0; }
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    transition: background-color 4s ease;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  body.idle, body.idle * { cursor: none; }
+
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.55) 100%);
+  }
+
+  .clock {
+    position: fixed; inset: 0;
+    display: grid; place-content: center; text-align: center;
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+  }
+  .clock.hidden { opacity: 0; }
+  .clock-inner { will-change: transform; }
+  .time {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(5.5rem, 22vw, 17rem);
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 60px rgba(0,0,0,0.35);
+  }
+  .time .colon { opacity: 0.45; font-style: italic; padding: 0 0.04em; transition: opacity 0.4s ease; }
+  .time .colon.dim { opacity: 0.15; }
+  .time .ampm { font-style: italic; font-size: 0.28em; margin-left: 0.15em; color: var(--ink-soft); }
+  .date {
+    margin-top: 1.1rem;
+    font-size: clamp(0.95rem, 1.8vw, 1.25rem);
+    font-weight: 300;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+  }
+
+  .palette-name {
+    position: fixed;
+    left: clamp(1.25rem, 3vw, 2.5rem);
+    bottom: calc(clamp(1.25rem, 3vw, 2.5rem) + env(safe-area-inset-bottom, 0px));
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 1.35rem;
+    color: var(--ink-soft);
+    opacity: 0;
+    transition: opacity 1.5s ease;
+    pointer-events: none;
+  }
+  .palette-name.show { opacity: 1; }
+
+  .hint {
+    position: fixed;
+    right: clamp(1.25rem, 3vw, 2.5rem);
+    bottom: calc(clamp(1.25rem, 3vw, 2.5rem) + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem 1.25rem;
+    max-width: calc(100% - 12rem);
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  .hint.show { opacity: 1; }
+  .hint span { white-space: nowrap; }
+  kbd {
+    font-family: var(--sans);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--ink-soft);
+    border: 1px solid var(--ink-faint);
+    border-radius: 5px;
+    padding: 0.1em 0.45em;
+    margin-right: 0.35em;
+  }
+  @media (max-width: 600px) { .hint { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="c" aria-hidden="true"></canvas>
+<div class="vignette"></div>
+
+<div class="clock" id="clock" aria-live="off">
+  <div class="clock-inner" id="clockInner">
+    <div class="time" id="time"></div>
+    <div class="date" id="date"></div>
+  </div>
+</div>
+
+<div class="palette-name" id="paletteName"></div>
+
+<div class="hint" id="hint">
+  <span><kbd>F</kbd>Fullscreen</span>
+  <span><kbd>Space</kbd>Next palette</span>
+  <span><kbd>C</kbd>Show or hide clock</span>
+  <span><kbd>H</kbd>12 or 24 hour</span>
+</div>
+
+<script>
+(() => {
+  // ---------- Palettes ----------
+  const PALETTES = [
+    { name: "Dusk",  bg: [12, 10, 30], cols: ["#7b5cff", "#ff6fa3", "#ffb86b"] },
+    { name: "Tide",  bg: [4, 15, 26],  cols: ["#1fb5c9", "#4d7cff", "#bff4ff"] },
+    { name: "Ember", bg: [20, 8, 7],   cols: ["#ff5a36", "#ffa53d", "#ffe2b0"] },
+    { name: "Moss",  bg: [6, 17, 14],  cols: ["#3ddc97", "#c6f26b", "#5fb7a5"] },
+    { name: "Bloom", bg: [17, 8, 22],  cols: ["#e36bff", "#6b8bff", "#ffc8e8"] },
+  ];
+  const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  PALETTES.forEach(p => p.rgb = p.cols.map(hex));
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("drift:" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("drift:" + k, JSON.stringify(v)); } catch {} }
+  };
+
+  let paletteIdx = Math.min(store.get("palette", 0), PALETTES.length - 1);
+  let showClock = store.get("clock", true);
+  let use24 = store.get("h24", true);
+
+  // current colors blend toward target
+  let cur = { bg: [...PALETTES[paletteIdx].bg], rgb: PALETTES[paletteIdx].rgb.map(c => [...c]) };
+
+  // ---------- Perlin noise ----------
+  const perm = new Uint8Array(512);
+  (() => {
+    const p = Array.from({ length: 256 }, (_, i) => i);
+    for (let i = 255; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  })();
+  const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const grad = (h, x, y, z) => {
+    h &= 15;
+    const u = h < 8 ? x : y;
+    const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+  };
+  function noise(x, y, z) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+    const u = fade(x), v = fade(y), w = fade(z);
+    const A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z;
+    const B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+    return lerp(
+      lerp(lerp(grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z), u),
+           lerp(grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z), u), v),
+      lerp(lerp(grad(perm[AA + 1], x, y, z - 1), grad(perm[BA + 1], x - 1, y, z - 1), u),
+           lerp(grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1), u), v),
+      w);
+  }
+
+  // ---------- Canvas ----------
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let W, H, dpr, particles = [];
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.floor(W * dpr); canvas.height = Math.floor(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = `rgb(${cur.bg.join(",")})`;
+    ctx.fillRect(0, 0, W, H);
+    const count = Math.round(Math.min(2200, Math.max(600, (W * H) / 900)));
+    particles = Array.from({ length: count }, () => spawn({}, true));
+  }
+
+  function spawn(p, initial) {
+    p.x = Math.random() * W;
+    p.y = Math.random() * H;
+    p.px = p.x; p.py = p.y;
+    p.vx = 0; p.vy = 0;
+    p.life = 0;
+    p.max = 120 + Math.random() * 260;
+    if (initial) p.life = Math.random() * p.max;
+    p.c = Math.floor(Math.random() * 3);
+    p.w = 0.6 + Math.random() * 1.1;
+    return p;
+  }
+
+  const SCALE = 0.0018;
+  let t = Math.random() * 100;
+
+  function frame() {
+    const speed = reduced ? 0.35 : 1;
+    t += 0.0009 * speed;
+
+    // blend colors toward target palette
+    const target = PALETTES[paletteIdx];
+    for (let i = 0; i < 3; i++) cur.bg[i] = lerp(cur.bg[i], target.bg[i], 0.02);
+    for (let c = 0; c < 3; c++) for (let i = 0; i < 3; i++) cur.rgb[c][i] = lerp(cur.rgb[c][i], target.rgb[c][i], 0.02);
+
+    // fade trails
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = `rgba(${cur.bg.map(Math.round).join(",")},0.055)`;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap = "round";
+
+    const strokes = [[], [], []];
+    for (const p of particles) {
+      const n = noise(p.x * SCALE, p.y * SCALE, t);
+      const n2 = noise(p.x * SCALE * 0.35 + 50, p.y * SCALE * 0.35, t * 0.5);
+      const a = (n * 2.4 + n2 * 1.6) * Math.PI * 2;
+      p.vx = p.vx * 0.9 + Math.cos(a) * 0.32 * speed;
+      p.vy = p.vy * 0.9 + Math.sin(a) * 0.32 * speed;
+      p.px = p.x; p.py = p.y;
+      p.x += p.vx; p.y += p.vy;
+      p.life++;
+      if (p.life > p.max || p.x < -10 || p.x > W + 10 || p.y < -10 || p.y > H + 10) { spawn(p); continue; }
+      strokes[p.c].push(p);
+    }
+
+    for (let c = 0; c < 3; c++) {
+      const [r, g, b] = cur.rgb[c].map(Math.round);
+      ctx.strokeStyle = `rgba(${r},${g},${b},0.22)`;
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      for (const p of strokes[c]) {
+        // fade in / out over lifetime
+        const k = Math.sin((p.life / p.max) * Math.PI);
+        if (k < 0.15) continue;
+        ctx.moveTo(p.px, p.py);
+        ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Clock ----------
+  const timeEl = document.getElementById("time");
+  const dateEl = document.getElementById("date");
+  const clockEl = document.getElementById("clock");
+  const clockInner = document.getElementById("clockInner");
+  const pad = n => String(n).padStart(2, "0");
+  let lastMin = -1;
+
+  function tick() {
+    const now = new Date();
+    const m = now.getMinutes();
+    let h = now.getHours();
+    const colonDim = now.getSeconds() % 2 === 1;
+    if (m !== lastMin || timeEl.dataset.h24 !== String(use24)) {
+      lastMin = m;
+      timeEl.dataset.h24 = String(use24);
+      let ampm = "";
+      if (!use24) { ampm = h >= 12 ? "pm" : "am"; h = h % 12 || 12; }
+      timeEl.innerHTML = `${use24 ? pad(h) : h}<span class="colon" id="colon">:</span>${pad(m)}${ampm ? `<span class="ampm">${ampm}</span>` : ""}`;
+      dateEl.textContent = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    }
+    const colon = document.getElementById("colon");
+    if (colon) colon.classList.toggle("dim", colonDim && !reduced);
+
+    // slow drift to protect screens from burn-in
+    const s = now.getTime() / 1000;
+    const dx = Math.sin(s / 47) * 4 + Math.sin(s / 131) * 3;
+    const dy = Math.cos(s / 59) * 3 + Math.sin(s / 173) * 2;
+    clockInner.style.transform = `translate(${dx}vw, ${dy}vh)`;
+  }
+
+  function applyClock() { clockEl.classList.toggle("hidden", !showClock); }
+
+  // ---------- Palette switching ----------
+  const nameEl = document.getElementById("paletteName");
+  let nameTimer;
+  function setPalette(i, announce = true) {
+    paletteIdx = (i + PALETTES.length) % PALETTES.length;
+    store.set("palette", paletteIdx);
+    if (announce) {
+      nameEl.textContent = PALETTES[paletteIdx].name;
+      nameEl.classList.add("show");
+      clearTimeout(nameTimer);
+      nameTimer = setTimeout(() => nameEl.classList.remove("show"), 2600);
+    }
+    document.body.style.backgroundColor = `rgb(${PALETTES[paletteIdx].bg.join(",")})`;
+    resetAuto();
+  }
+  let autoTimer;
+  function resetAuto() {
+    clearInterval(autoTimer);
+    autoTimer = setInterval(() => setPalette(paletteIdx + 1, false), 120000);
+  }
+
+  // ---------- Fullscreen ----------
+  function toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+      else document.exitFullscreen?.().catch(() => {});
+    } catch {}
+  }
+
+  // ---------- Idle cursor & hint ----------
+  const hint = document.getElementById("hint");
+  let idleTimer;
+  function wake() {
+    document.body.classList.remove("idle");
+    hint.classList.add("show");
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      document.body.classList.add("idle");
+      hint.classList.remove("show");
+    }, 2500);
+  }
+
+  // ---------- Keep screen awake ----------
+  let wakeLock = null;
+  async function requestWake() {
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+  }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") requestWake(); });
+
+  // ---------- Events ----------
+  window.addEventListener("resize", resize);
+  window.addEventListener("mousemove", wake);
+  window.addEventListener("touchstart", wake, { passive: true });
+  window.addEventListener("dblclick", toggleFullscreen);
+  window.addEventListener("keydown", e => {
+    wake();
+    const k = e.key.toLowerCase();
+    if (k === "f") toggleFullscreen();
+    else if (k === " " || k === "arrowright") { e.preventDefault(); setPalette(paletteIdx + 1); }
+    else if (k === "arrowleft") setPalette(paletteIdx - 1);
+    else if (k === "c") { showClock = !showClock; store.set("clock", showClock); applyClock(); }
+    else if (k === "h") { use24 = !use24; store.set("h24", use24); tick(); }
+  });
+
+  // ---------- Start ----------
+  document.body.style.backgroundColor = `rgb(${PALETTES[paletteIdx].bg.join(",")})`;
+  resize();
+  applyClock();
+  tick();
+  setInterval(tick, 1000);
+  resetAuto();
+  requestWake();
+  wake();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
